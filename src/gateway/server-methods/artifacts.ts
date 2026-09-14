@@ -12,14 +12,19 @@ import {
   errorShape,
   type ArtifactSummary,
   type ArtifactsGetParams,
+  type ArtifactsListParams,
   validateArtifactsDownloadParams,
   validateArtifactsGetParams,
   validateArtifactsListParams,
 } from "../../../packages/gateway-protocol/src/index.js";
+import { findMarkdownImageSpans } from "../../../packages/markdown-core/src/image-spans.js";
 import { AgentSelectionRequiredError } from "../../agents/agent-scope-config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { parseAgentSessionKey, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
-import { readAssistantDisplayContent } from "../../shared/assistant-display-content.js";
+import {
+  ASSISTANT_DISPLAY_CONTENT_FIELD,
+  readAssistantDisplayContent,
+} from "../../shared/assistant-display-content.js";
 import {
   parseManagedOutgoingArtifactId,
   resolveManagedOutgoingMediaArtifactDownload,
@@ -37,6 +42,7 @@ import {
   mimeFromDataUrl,
   readArtifactBase64Payload,
 } from "./artifacts-base64.js";
+import { readArtifactImagePage } from "./artifacts-image-page.js";
 import {
   ArtifactSessionResolutionError,
   type ArtifactQuery,
@@ -244,6 +250,7 @@ function collectArtifactsFromMessage(params: {
   taskId?: string;
   includeDownloadData?: boolean;
   downloadArtifactId?: string;
+  imagesOnly?: boolean;
 }): void {
   const msg = asOptionalRecord(params.message);
   if (!msg) {
@@ -259,13 +266,32 @@ function collectArtifactsFromMessage(params: {
     return;
   }
   const content = readAssistantDisplayContent(msg);
+  if (params.imagesOnly) {
+    const texts =
+      typeof msg.content === "string" && !Array.isArray(msg[ASSISTANT_DISPLAY_CONTENT_FIELD])
+        ? [msg.content]
+        : content.flatMap((block) =>
+            block.type === "text" && typeof block.text === "string" ? [block.text] : [],
+          );
+    for (const text of texts) {
+      for (const span of findMarkdownImageSpans(text)) {
+        content.push({ type: "image", url: span.destination, title: "image" });
+      }
+    }
+  }
   for (let contentIndex = 0; contentIndex < content.length; contentIndex += 1) {
     const block = asOptionalRecord(content[contentIndex]);
     if (!block || !isArtifactBlock(block)) {
       continue;
     }
-    const type = normalizeArtifactType(asNonEmptyString(block.type) ?? "file");
     const attachment = asOptionalRecord(block.attachment);
+    const type =
+      params.imagesOnly && attachment?.kind === "image"
+        ? "image"
+        : normalizeArtifactType(asNonEmptyString(block.type) ?? "file");
+    if (params.imagesOnly && type !== "image") {
+      continue;
+    }
     const title =
       asNonEmptyString(block.title) ??
       asNonEmptyString(block.fileName) ??
@@ -289,8 +315,18 @@ function collectArtifactsFromMessage(params: {
       ? params.downloadArtifactId === id
       : params.includeDownloadData !== false;
     const download = resolveBlockDownload(attachment ?? block, { includeData });
+    const source = asOptionalRecord(block.source);
+    const previewOnly = params.imagesOnly && !parseManagedOutgoingArtifactId(id);
+    const imageUrl = params.imagesOnly
+      ? download.data !== undefined
+        ? `data:${download.mimeType ?? "image/png"};base64,${download.data}`
+        : (asNonEmptyString(attachment?.url) ??
+          asNonEmptyString(block.url) ??
+          asNonEmptyString(source?.url) ??
+          mediaUrlValue(block.image_url))
+      : undefined;
     const summary: ArtifactRecord = {
-      id,
+      id: previewOnly ? `preview_${id}` : id,
       type,
       title,
       ...(download.mimeType ? { mimeType: download.mimeType } : {}),
@@ -299,8 +335,9 @@ function collectArtifactsFromMessage(params: {
       ...(messageRunId ? { runId: messageRunId } : {}),
       ...(messageTaskId ? { taskId: messageTaskId } : {}),
       messageSeq,
-      source: "session-transcript",
-      download: { mode: download.mode },
+      source: previewOnly ? "session-transcript-preview" : "session-transcript",
+      download: { mode: previewOnly ? "unsupported" : download.mode },
+      ...(imageUrl ? { image: { url: imageUrl } } : {}),
       ...(download.data !== undefined ? { data: download.data } : {}),
       ...(download.url ? { url: download.url } : {}),
     };
@@ -310,11 +347,16 @@ function collectArtifactsFromMessage(params: {
 
 /** Loads artifacts from the transcript selected by sessionKey, runId, or taskId. */
 async function loadArtifacts(
-  query: ArtifactQuery,
+  query: ArtifactsListParams,
   cfg?: OpenClawConfig,
   opts: ArtifactCollectionOptions = {},
   client: GatewayClient | null = null,
-): Promise<{ artifacts: ArtifactRecord[]; sessionKey?: string }> {
+): Promise<{
+  artifacts: ArtifactRecord[];
+  sessionKey?: string;
+  nextCursor?: string;
+  omittedOversized?: boolean;
+}> {
   const resolved = resolveAuthorizedArtifactSession(query, cfg, client);
   if (!resolved) {
     return { artifacts: [] };
@@ -329,27 +371,51 @@ async function loadArtifacts(
     return { sessionKey, artifacts: [] };
   }
   const artifacts: ArtifactRecord[] = [];
-  await visitSessionMessagesAsync(
-    {
-      agentId: resolved.agentId ?? resolveAgentIdFromSessionKey(sessionKey),
-      sessionEntry: entry,
-      sessionId,
+  const scope = {
+    agentId: resolved.agentId ?? resolveAgentIdFromSessionKey(sessionKey),
+    sessionEntry: entry,
+    sessionId,
+    sessionKey,
+    storePath,
+  };
+  if (query.type === "image") {
+    const page = await readArtifactImagePage({
+      scope,
+      binding: JSON.stringify([sessionKey, scope.agentId, sessionId, query.runId, query.taskId]),
+      client,
+      cursor: query.cursor,
+      limit: query.limit ?? 4,
+      collect: (message) => {
+        const images: ArtifactRecord[] = [];
+        collectArtifactsFromMessage({
+          message,
+          messageFallbackSeq: 1,
+          artifacts: images,
+          sessionKey,
+          runId: query.runId,
+          taskId: query.taskId,
+          imagesOnly: true,
+        });
+        return images
+          .filter((artifact) => artifact.image)
+          .map(toSummary)
+          .toReversed();
+      },
+    });
+    return { ...page, sessionKey };
+  }
+  await visitSessionMessagesAsync(scope, (message, seq) => {
+    collectArtifactsFromMessage({
+      message,
+      messageFallbackSeq: seq,
+      artifacts,
       sessionKey,
-      storePath,
-    },
-    (message, seq) => {
-      collectArtifactsFromMessage({
-        message,
-        messageFallbackSeq: seq,
-        artifacts,
-        sessionKey,
-        runId: query.runId,
-        taskId: query.taskId,
-        includeDownloadData: opts.includeDownloadData,
-        downloadArtifactId: opts.downloadArtifactId,
-      });
-    },
-  );
+      runId: query.runId,
+      taskId: query.taskId,
+      includeDownloadData: opts.includeDownloadData,
+      downloadArtifactId: opts.downloadArtifactId,
+    });
+  });
   return {
     sessionKey,
     artifacts,
@@ -430,6 +496,14 @@ export const artifactsHandlers: GatewayRequestHandlers = {
     if (!requireQueryable(params, respond)) {
       return;
     }
+    if (params.type !== "image" && (params.limit !== undefined || params.cursor !== undefined)) {
+      respond(
+        false,
+        undefined,
+        artifactError("artifact_query_unsupported", "limit and cursor require type image"),
+      );
+      return;
+    }
     const cfg = context.getRuntimeConfig?.();
     const admittedQuery = admitArtifactQuery(params, cfg, respond);
     if (!admittedQuery) {
@@ -441,7 +515,7 @@ export const artifactsHandlers: GatewayRequestHandlers = {
     if (!loaded.ok) {
       return;
     }
-    const { artifacts, sessionKey } = loaded.value;
+    const { artifacts, sessionKey, nextCursor, omittedOversized } = loaded.value;
     if (!sessionKey && (params.runId || params.taskId)) {
       respond(
         false,
@@ -450,7 +524,11 @@ export const artifactsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    respond(true, { artifacts: artifacts.map(toSummary) });
+    respond(true, {
+      artifacts: artifacts.map(toSummary),
+      ...(nextCursor ? { nextCursor } : {}),
+      ...(omittedOversized ? { omittedOversized: true } : {}),
+    });
   },
   "artifacts.get": async ({ params, respond, context, client }) => {
     if (!assertValidParams(params, validateArtifactsGetParams, "artifacts.get", respond)) {
