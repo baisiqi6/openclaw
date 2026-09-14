@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { LegacyConfigUpdatePlan } from "../../commands/doctor/legacy-config-repair.js";
 import { cloneEnvWithPlatformSemantics } from "../../config/env-vars.js";
 import { createConfigIO } from "../../config/io.js";
+import { formatConfigIssueLines } from "../../config/issue-format.js";
 import { resolveConfiguredAgentDatabaseCandidatePaths } from "../../config/sessions/targets.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
@@ -117,7 +118,11 @@ export async function captureTargetDatabaseSchemaContext(
   if ((!snapshot.valid && !legacyConfigPlan) || snapshot.readError) {
     throw new UpdatePreMutationError(
       "database-schema-preflight",
-      `Update refused: could not inspect configured database paths from ${snapshot.path}. Correct the configuration before retrying.`,
+      [
+        `Update refused: could not inspect configured database paths from ${snapshot.path}.`,
+        ...formatConfigIssueLines(snapshot.issues, "-", { normalizeRoot: true }),
+        "Run `openclaw doctor --fix` to repair retired or unrecognized configuration fields, then correct any remaining errors before retrying.",
+      ].join("\n"),
     );
   }
   return {
