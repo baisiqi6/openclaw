@@ -3228,6 +3228,7 @@ export const en: TranslationMap & {
       cli: "Command line",
       terminal: "Terminal",
       app: "App",
+      rpc: "RPC",
     },
   },
   activityFeed: {
@@ -5032,6 +5033,8 @@ export const en: TranslationMap & {
     },
     messages: {
       copySelection: "Copy",
+      viaSource: "via {source}",
+      sourceKinds: { web: "Web", cli: "CLI", terminal: "TUI", app: "App", rpc: "RPC" },
       copyLink: "Copy link",
       copyFileName: "Copy file name",
       forkFromHere: "Fork from here",
