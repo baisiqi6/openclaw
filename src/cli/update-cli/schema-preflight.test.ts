@@ -316,6 +316,23 @@ describe("planned legacy configuration admission", () => {
 });
 
 describe("planned migration managed profile isolation", () => {
+  it("reports invalid model policy paths without disclosing their values", async () => {
+    await withTempHome(async (home) => {
+      const rejectedValue = "synthetic-private-config-value";
+      const configPath = await writeOpenClawConfig(home, {
+        agents: { defaults: { modelPolicy: { allow: [rejectedValue] } } },
+      });
+      const env = { ...process.env, OPENCLAW_CONFIG_PATH: configPath };
+      const before = fs.readFileSync(configPath);
+      const inspected = captureTargetDatabaseSchemaContext(env);
+      await expect(inspected).rejects.toMatchObject({ reason: "database-schema-preflight" });
+      await expect(inspected).rejects.toThrow("agents.defaults.modelPolicy.allow.0:");
+      await expect(inspected).rejects.toThrow("openclaw doctor --fix");
+      await expect(inspected).rejects.not.toThrow(rejectedValue);
+      expect(fs.readFileSync(configPath)).toEqual(before);
+    });
+  });
+
   it("refuses a newly valid replacement of the planned source before admission", async () => {
     await withTempHome(async (home) => {
       const configPath = await writeOpenClawConfig(home, {

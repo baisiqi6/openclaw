@@ -120,7 +120,16 @@ export async function captureTargetDatabaseSchemaContext(
       "database-schema-preflight",
       [
         `Update refused: could not inspect configured database paths from ${snapshot.path}.`,
-        ...formatConfigIssueLines(snapshot.issues, "-", { normalizeRoot: true }),
+        ...formatConfigIssueLines(
+          // Validator messages can contain config values, including misplaced secrets.
+          snapshot.issues.map(({ path: issuePath, pathSegments }) => ({
+            path: issuePath,
+            pathSegments,
+            message: "Invalid configuration field",
+          })),
+          "-",
+          { normalizeRoot: true },
+        ),
         "Run `openclaw doctor --fix` to repair retired or unrecognized configuration fields, then correct any remaining errors before retrying.",
       ].join("\n"),
     );
