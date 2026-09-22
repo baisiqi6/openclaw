@@ -354,14 +354,15 @@ export async function loadDotEnvAsync(opts: {
 
 export { loadGlobalRuntimeDotEnvFiles };
 
-export function loadDotEnv(opts?: { quiet?: boolean }) {
+export function loadDotEnv(opts?: { quiet?: boolean; env?: NodeJS.ProcessEnv }) {
   const quiet = opts?.quiet ?? true;
+  const env = opts?.env ?? process.env;
   const workspaceEnvPath = resolveWorkspaceDotEnvPath();
   if (workspaceEnvPath) {
-    loadWorkspaceDotEnvFile(workspaceEnvPath, { quiet });
+    loadWorkspaceDotEnvFile(workspaceEnvPath, { quiet, env });
   }
 
   // Then load global fallback: ~/.openclaw/.env (or OPENCLAW_STATE_DIR/.env),
   // without overriding any env vars already present.
-  loadGlobalRuntimeDotEnvFiles({ quiet });
+  loadGlobalRuntimeDotEnvFiles({ quiet, env });
 }
