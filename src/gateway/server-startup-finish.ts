@@ -126,7 +126,6 @@ export async function finishGatewayStartup(params: {
     controlUiBasePath,
     controlUiRootLifecycle,
     sidecarStartup,
-    workerLiveEvents,
     startEarlyRuntime,
     cfgAtStart,
     preauthConnectionBudget,
@@ -220,6 +219,7 @@ export async function finishGatewayStartup(params: {
         return;
       }
       const activated = gatewayRuntimeServices.activateGatewayScheduledServices({
+        scheduler: runtime.scheduler,
         minimalTestGateway,
         cfgAtStart,
         deps,
@@ -245,6 +245,7 @@ export async function finishGatewayStartup(params: {
     startupTrace.measure("runtime.post-attach", () =>
       loadGatewayStartupPostAttachModule().then(({ startGatewayPostAttachRuntime }) =>
         startGatewayPostAttachRuntime({
+          scheduler: runtime.scheduler,
           minimalTestGateway,
           updateCanary: opts.updateCanary,
           cfgAtStart,
@@ -443,6 +444,7 @@ export async function finishGatewayStartup(params: {
   let appliedCustomPluginUiEnabled =
     gatewayPluginConfigAtStart.gateway?.controlUi?.experimental?.customPlugins === true;
   const configReloaderParams: Parameters<typeof startManagedGatewayConfigReloader>[0] = {
+    scheduler: runtime.scheduler,
     onReloadEnabledChange: tlsRenewal?.setEnabled,
     configRevisionProjector: gatewayRequestContext.configRevisionProjector,
     resolveGatewayContext: resolvePluginGatewayContext,
@@ -586,7 +588,6 @@ export async function finishGatewayStartup(params: {
       browserAuthRateLimiter.updateConfig({ ...rateLimit, exemptLoopback: false });
       nodeReapprovalCoordinator.updateConfig(rateLimit);
       terminalLaunchPolicy.commitConfig();
-      workerLiveEvents?.rebindAll(nextConfig);
       workerEnvironmentService?.schedulePreparedRefill();
     },
     acceptTerminalConfig: terminalLaunchPolicy.acceptConfig,
@@ -665,6 +666,8 @@ export async function finishGatewayStartup(params: {
     ];
     registerGatewayLifetimeSidecars(
       gatewayRuntimeServices.scheduleGatewayIdleTask({
+        id: "maintenance:retained-plugin-generations",
+        scheduler: runtime.scheduler,
         delayMs: RETAINED_PLUGIN_CLEANUP_DELAY_MS,
         retryDelayMs: RETAINED_PLUGIN_CLEANUP_DELAY_MS,
         isClosing: () => lifecycle.closePreludeStarted,
@@ -680,6 +683,8 @@ export async function finishGatewayStartup(params: {
     );
     registerGatewayLifetimeSidecars(
       gatewayRuntimeServices.scheduleGatewayIdleTask({
+        id: "maintenance:sqlite-snapshots",
+        scheduler: runtime.scheduler,
         delayMs: RETAINED_PLUGIN_CLEANUP_DELAY_MS,
         retryDelayMs: RETAINED_PLUGIN_CLEANUP_DELAY_MS,
         isClosing: () => lifecycle.closePreludeStarted,

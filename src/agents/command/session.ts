@@ -34,6 +34,7 @@ import {
   type SessionEntrySummary,
 } from "../../config/sessions/session-accessor.js";
 import { resolveSessionKey } from "../../config/sessions/session-key.js";
+import { resolveUnsuffixedSqliteTargetFromSessionStorePath } from "../../config/sessions/session-sqlite-target-paths.js";
 import {
   resolvePersistedSessionStoreOwner,
   resolvePersistedSessionStoreOwnerForKey,
@@ -205,6 +206,9 @@ function collectSessionIdMatchesForRequest(opts: {
     candidateAgentId: string | undefined,
     options?: { primary?: boolean },
   ): void => {
+    // The successful listing already validated a partition's scoped owner; do not inspect it again.
+    const candidateStoreTarget =
+      resolveUnsuffixedSqliteTargetFromSessionStorePath(candidateStorePath);
     for (const { sessionKey: candidateKey, entry: candidateEntry } of candidateEntries) {
       if (candidateEntry?.sessionId !== opts.sessionId) {
         continue;
@@ -232,7 +236,8 @@ function collectSessionIdMatchesForRequest(opts: {
           ? persistedStoreOwner.agentId
           : persistedStoreOwner.kind === "retired"
             ? undefined
-            : (pathOwnedAgentId ??
+            : ((!candidateStoreTarget.shared ? scopedCandidateAgentId : undefined) ??
+              pathOwnedAgentId ??
               (opts.searchOtherAgentStores ? undefined : scopedCandidateAgentId) ??
               compatibilityAgentId)
         : undefined;
@@ -567,7 +572,7 @@ export function resolveExistingSessionKeyForRequest(opts: {
 }
 
 /** Resolves the session key/store targeted by one command request. */
-function resolveSessionKeyForRequest(opts: {
+export function resolveSessionKeyForRequestCore(opts: {
   cfg: OpenClawConfig;
   to?: string;
   sessionId?: string;
@@ -575,13 +580,6 @@ function resolveSessionKeyForRequest(opts: {
   agentId?: string;
 }): SessionKeyResolution {
   return resolveSessionKeyForRequestInternal({ ...opts, createMissingSessionId: true });
-}
-
-/** Core alias retained for runtime owners that bypass the public library facade. */
-export function resolveSessionKeyForRequestCore(
-  opts: Parameters<typeof resolveSessionKeyForRequest>[0],
-): SessionKeyResolution {
-  return resolveSessionKeyForRequest(opts);
 }
 
 /** Resolves or creates the session used by one agent command request. */

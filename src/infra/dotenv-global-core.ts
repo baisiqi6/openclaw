@@ -1,9 +1,9 @@
 // Reads and applies global dotenv files without loading config or logging.
 import fs from "node:fs";
+import { readRegularFile, readRegularFileSync } from "@openclaw/fs-safe/advanced";
 import { parse as parseDotEnv } from "dotenv";
 import { resolveGlobalRuntimeDotEnvPaths } from "./dotenv-paths.js";
 import { normalizeEnvVarKey } from "./host-env-security.js";
-import { readRegularFile, readRegularFileSync } from "./regular-file.js";
 
 /** Maximum bytes to read from any dotenv file. */
 const MAX_DOTENV_FILE_BYTES = 1024 * 1024;
