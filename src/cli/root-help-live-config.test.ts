@@ -11,6 +11,7 @@ const { configModuleLoadedMock, readConfigFileSnapshotMock } = vi.hoisted(() => 
   readConfigFileSnapshotMock: vi.fn(),
 }));
 
+// mock-isolation: observes config import without initializing real config state or plugin runtime.
 vi.mock("../config/config.js", () => {
   configModuleLoadedMock();
   return {

@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { resolveWorkspaceDotEnvPath } from "../infra/dotenv-paths.js";
+import { resolveConfigPathCandidate } from "./paths.js";
 import { canUsePrecomputedRootHelpWithoutLiveConfig } from "./root-help-preflight.js";
 
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
@@ -49,7 +50,6 @@ describe("root help config preflight", () => {
 
   it.each([
     { name: "default", dir: ".openclaw", file: "openclaw.json", env: {} },
-    { name: "legacy", dir: ".clawdbot", file: "clawdbot.json", env: {} },
     {
       name: "named profile state",
       dir: ".openclaw-work",
@@ -74,6 +74,26 @@ describe("root help config preflight", () => {
         { cwd, homedir: () => home },
       ),
     ).toBe(true);
+  });
+
+  it("follows canonical selection unless a legacy config is explicitly selected", () => {
+    const home = tempDirs.make("openclaw-root-help-legacy-selection-");
+    const cwd = path.join(home, "cwd");
+    const legacyConfigPath = path.join(home, ".clawdbot", "clawdbot.json");
+    fs.mkdirSync(cwd, { recursive: true });
+    fs.mkdirSync(path.dirname(legacyConfigPath), { recursive: true });
+    fs.writeFileSync(legacyConfigPath, '{"plugins":{}}', "utf8");
+    const env = { HOME: home };
+    const options = { cwd, homedir: () => home };
+
+    expect(resolveConfigPathCandidate(env, options.homedir)).toBe(
+      path.join(home, ".openclaw", "openclaw.json"),
+    );
+    expect(canUsePrecomputedRootHelpWithoutLiveConfig(env, options)).toBe(false);
+
+    const selectedEnv = { ...env, OPENCLAW_CONFIG_PATH: legacyConfigPath };
+    expect(resolveConfigPathCandidate(selectedEnv, options.homedir)).toBe(legacyConfigPath);
+    expect(canUsePrecomputedRootHelpWithoutLiveConfig(selectedEnv, options)).toBe(true);
   });
 
   it.each([

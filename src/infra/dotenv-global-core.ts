@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { readRegularFile, readRegularFileSync } from "@openclaw/fs-safe/advanced";
 import { parse as parseDotEnv } from "dotenv";
 import { resolveGlobalRuntimeDotEnvPaths } from "./dotenv-paths.js";
+import { clearFsSafeEnvFallback, normalizeFsSafeNativeEnv } from "./fs-safe-env.js";
 import { normalizeEnvVarKey } from "./host-env-security.js";
 
 /** Maximum bytes to read from any dotenv file. */
@@ -109,6 +110,7 @@ function loadParsedDotEnvFiles(
   overrideKeys?: Iterable<string>,
   onWarning?: DotEnvWarning,
 ): Map<string, string[]> {
+  clearFsSafeEnvFallback(env);
   const preExistingKeys = new Set(Object.keys(env));
   const canonicalizeKey = (key: string): string | null =>
     normalizeEnvVarKey(key, { portable: true })?.toUpperCase() ?? null;
@@ -171,6 +173,7 @@ function loadParsedDotEnvFiles(
     }
   }
 
+  normalizeFsSafeNativeEnv(env);
   for (const conflict of conflicts.values()) {
     const keys = [...conflict.keys].toSorted();
     onWarning?.(
